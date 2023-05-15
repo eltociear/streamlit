@@ -172,7 +172,7 @@ export class TextInput extends React.PureComponent<Props, State> {
 
   public render(): React.ReactNode {
     const { dirty, value } = this.state
-    const { element, width, disabled, widgetMgr, theme } = this.props
+    const { element, width, disabled, widgetMgr } = this.props
     const { placeholder } = element
 
     // Manage our form-clear event handler.
