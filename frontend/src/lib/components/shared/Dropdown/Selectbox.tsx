@@ -20,6 +20,8 @@ import { Select as UISelect, OnChangeParams, Option } from "baseui/select"
 import { logWarning } from "src/lib/util/log"
 import VirtualDropdown from "src/lib/components/shared/Dropdown/VirtualDropdown"
 import { hasMatch, score } from "fzy.js"
+import { withTheme } from "@emotion/react"
+import { EmotionTheme } from "src/lib/theme"
 import _ from "lodash"
 import { LabelVisibilityOptions } from "src/lib/util/utils"
 import { Placement } from "src/lib/components/shared/Tooltip"
@@ -32,12 +34,14 @@ import {
 export interface Props {
   disabled: boolean
   width?: number
-  value: number
-  onChange: (value: number) => void
+  value?: number
+  onChange: (value?: number) => void
   options: any[]
   label?: string | null
   labelVisibility?: LabelVisibilityOptions
   help?: string
+  theme: EmotionTheme
+  clearable?: boolean
 }
 
 interface State {
@@ -47,7 +51,7 @@ interface State {
    * The value specified by the user via the UI. If the user didn't touch this
    * widget's UI, the default value is used.
    */
-  value: number
+  value?: number
 }
 
 interface SelectOption {
@@ -75,7 +79,7 @@ export function fuzzyFilterSelectOptions(
     .value()
 }
 
-class Selectbox extends React.PureComponent<Props, State> {
+export class Selectbox extends React.PureComponent<Props, State> {
   public state: State = {
     isEmpty: false,
     value: this.props.value,
@@ -95,6 +99,8 @@ class Selectbox extends React.PureComponent<Props, State> {
   private onChange = (params: OnChangeParams): void => {
     if (params.value.length === 0) {
       logWarning("No value selected!")
+      this.setState({ value: undefined })
+      this.props.onChange(undefined)
       return
     }
 
@@ -135,20 +141,26 @@ class Selectbox extends React.PureComponent<Props, State> {
 
   public render(): React.ReactNode {
     const style = { width: this.props.width }
-    const { label, labelVisibility, help } = this.props
+    const { label, labelVisibility, help, clearable, theme } = this.props
     let { disabled, options } = this.props
 
+    const noOptionsMsg = "No options to select."
+    const chooseOptionMsg = "Choose an option"
     let value = [
       {
         label:
-          options.length > 0
+          options.length > 0 && this.state.value
             ? options[this.state.value]
-            : "No options to select.",
-        value: this.state.value.toString(),
+            : clearable
+            ? null
+            : noOptionsMsg,
+        value: this.state.value
+          ? this.state.value.toString()
+          : this.state.value,
       },
     ]
 
-    if (this.state.isEmpty) {
+    if (this.state.isEmpty || this.state.value === undefined) {
       value = []
     }
 
@@ -182,13 +194,14 @@ class Selectbox extends React.PureComponent<Props, State> {
           )}
         </WidgetLabel>
         <UISelect
-          clearable={false}
           disabled={disabled}
           labelKey="label"
           aria-label={label || ""}
-          onChange={this.onChange}
+          onChange={this.onChange as (params: OnChangeParams) => unknown}
           onInputChange={this.onInputChange}
           onClose={this.onClose}
+          clearable={clearable}
+          placeholder={clearable ? chooseOptionMsg : null}
           options={selectOptions}
           filterOptions={this.filterOptions}
           value={value}
@@ -200,7 +213,25 @@ class Selectbox extends React.PureComponent<Props, State> {
               }),
             },
             Dropdown: { component: VirtualDropdown },
-
+            ClearIcon: {
+              props: {
+                overrides: {
+                  Svg: {
+                    style: {
+                      color: theme.colors.darkGray,
+                      // Since the close icon is an SVG, and we can't control its viewbox nor its attributes,
+                      // Let's use a scale transform effect to make it bigger.
+                      // The width property only enlarges its bounding box, so it's easier to click.
+                      transform: "scale(1.25)",
+                      width: theme.spacing.twoXL,
+                      ":hover": {
+                        fill: theme.colors.bodyText,
+                      },
+                    },
+                  },
+                },
+              },
+            },
             ControlContainer: {
               style: () => ({
                 // Baseweb requires long-hand props, short-hand leads to weird bugs & warnings.
@@ -259,4 +290,4 @@ class Selectbox extends React.PureComponent<Props, State> {
   }
 }
 
-export default Selectbox
+export default withTheme(Selectbox)

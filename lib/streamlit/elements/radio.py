@@ -14,7 +14,16 @@
 
 from dataclasses import dataclass
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any, Callable, Generic, Optional, Sequence, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Generic,
+    Optional,
+    Sequence,
+    Union,
+    cast,
+)
 
 from streamlit.elements.form import current_form_id
 from streamlit.elements.utils import (
@@ -53,6 +62,8 @@ class RadioSerde(Generic[T]):
     index: int
 
     def serialize(self, v: object) -> int:
+        if v is None or v == -1:
+            return -1
         if len(self.options) == 0:
             return 0
         return index_(self.options, v)
@@ -63,7 +74,8 @@ class RadioSerde(Generic[T]):
         widget_id: str = "",
     ) -> Optional[T]:
         idx = ui_value if ui_value is not None else self.index
-
+        if idx == -1:
+            return None
         return (
             self.options[idx]
             if len(self.options) > 0 and self.options[idx] is not None
@@ -77,7 +89,7 @@ class RadioMixin:
         self,
         label: str,
         options: OptionSequence[T],
-        index: int = 0,
+        index: Optional[Union[int, None]] = 0,
         format_func: Callable[[Any], Any] = str,
         key: Optional[Key] = None,
         help: Optional[str] = None,
@@ -201,7 +213,7 @@ class RadioMixin:
         self,
         label: str,
         options: OptionSequence[T],
-        index: int = 0,
+        index: Optional[Union[int, None]] = 0,
         format_func: Callable[[Any], Any] = str,
         key: Optional[Key] = None,
         help: Optional[str] = None,
@@ -220,12 +232,14 @@ class RadioMixin:
         maybe_raise_label_warnings(label, label_visibility)
         opt = ensure_indexable(options)
 
+        index = -1 if index is None else index
+
         if not isinstance(index, int):
             raise StreamlitAPIException(
                 "Radio Value has invalid type: %s" % type(index).__name__
             )
 
-        if len(opt) > 0 and not 0 <= index < len(opt):
+        if index != -1 and len(opt) > 0 and not 0 <= index < len(opt):
             raise StreamlitAPIException(
                 "Radio index must be between 0 and length of options"
             )

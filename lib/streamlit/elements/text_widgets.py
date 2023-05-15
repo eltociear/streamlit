@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass
 from textwrap import dedent
-from typing import Optional, cast
+from typing import Optional, Union, cast
 
 from typing_extensions import Literal
 
@@ -44,6 +44,8 @@ from streamlit.type_util import (
     to_key,
 )
 
+NOT_NULLABLE_PREFIX = "_st_core_not_nullable"
+
 
 @dataclass
 class TextInputSerde:
@@ -51,6 +53,25 @@ class TextInputSerde:
 
     def deserialize(self, ui_value: Optional[str], widget_id: str = "") -> str:
         return str(ui_value if ui_value is not None else self.value)
+
+    def deserialize_nullable(
+        self, ui_value: Optional[str], widget_id: str = ""
+    ) -> Optional[str]:
+        not_nullable_key = f"{NOT_NULLABLE_PREFIX}_{widget_id}"
+        ctx = get_script_run_ctx()
+        nullable = False
+        if ctx and ctx.session_state:
+            if isinstance(ui_value, str) and len(ui_value) > 0 and ui_value != "None":
+                ctx.session_state[not_nullable_key] = True
+            try:
+                nullable = ctx.session_state[not_nullable_key] is False
+            except KeyError:
+                nullable = True
+        if ui_value is None or (ui_value == "None" and nullable):
+            ui_value = self.value  # type: ignore
+        if nullable:
+            return None if not ui_value or ui_value == "None" else ui_value
+        return "" if not ui_value else ui_value
 
     def serialize(self, v: str) -> str:
         return v
@@ -63,6 +84,25 @@ class TextAreaSerde:
     def deserialize(self, ui_value: Optional[str], widget_id: str = "") -> str:
         return str(ui_value if ui_value is not None else self.value)
 
+    def deserialize_nullable(
+        self, ui_value: Optional[str], widget_id: str = ""
+    ) -> Optional[str]:
+        not_nullable_key = f"{NOT_NULLABLE_PREFIX}_{widget_id}"
+        ctx = get_script_run_ctx()
+        nullable = False
+        if ctx and ctx.session_state:
+            if isinstance(ui_value, str) and len(ui_value) > 0 and ui_value != "None":
+                ctx.session_state[not_nullable_key] = True
+            try:
+                nullable = ctx.session_state[not_nullable_key] is False
+            except KeyError:
+                nullable = True
+        if ui_value is None or (ui_value == "None" and nullable):
+            ui_value = self.value  # type: ignore
+        if nullable:
+            return None if not ui_value or ui_value == "None" else ui_value
+        return "" if not ui_value else ui_value
+
     def serialize(self, v: str) -> str:
         return v
 
@@ -72,7 +112,7 @@ class TextWidgetsMixin:
     def text_input(
         self,
         label: str,
-        value: SupportsStr = "",
+        value: Union[SupportsStr, None] = "",
         max_chars: Optional[int] = None,
         key: Optional[Key] = None,
         type: Literal["default", "password"] = "default",
@@ -85,7 +125,7 @@ class TextWidgetsMixin:
         placeholder: Optional[str] = None,
         disabled: bool = False,
         label_visibility: LabelVisibility = "visible",
-    ) -> str:
+    ) -> Union[str, None]:
         r"""Display a single-line text input widget.
 
         Parameters
@@ -193,7 +233,7 @@ class TextWidgetsMixin:
     def _text_input(
         self,
         label: str,
-        value: SupportsStr = "",
+        value: Union[SupportsStr, None] = "",
         max_chars: Optional[int] = None,
         key: Optional[Key] = None,
         type: str = "default",
@@ -207,7 +247,7 @@ class TextWidgetsMixin:
         disabled: bool = False,
         label_visibility: LabelVisibility = "visible",
         ctx: Optional[ScriptRunContext] = None,
-    ) -> str:
+    ) -> Union[str, None]:
         key = to_key(key)
         check_callback_rules(self.dg, on_change)
         check_session_state_rules(default_value=None if value == "" else value, key=key)
@@ -216,7 +256,8 @@ class TextWidgetsMixin:
 
         text_input_proto = TextInputProto()
         text_input_proto.label = label
-        text_input_proto.default = str(value)
+        text_input_proto.default = "" if value is None else str(value)
+        clearable = value is None
         text_input_proto.form_id = current_form_id(self.dg)
 
         if help is not None:
@@ -253,29 +294,50 @@ class TextWidgetsMixin:
             on_change_handler=on_change,
             args=args,
             kwargs=kwargs,
-            deserializer=serde.deserialize,
-            serializer=serde.serialize,
+            deserializer=serde.deserialize_nullable if clearable else serde.deserialize,
+            serializer=serde.deserialize_nullable if clearable else serde.serialize,  # type: ignore
             ctx=ctx,
         )
+        not_nullable_key = f"{NOT_NULLABLE_PREFIX}_{widget_state.widget_id}"
 
         # This needs to be done after register_widget because we don't want
         # the following proto fields to affect a widget's ID.
         text_input_proto.disabled = disabled
+        text_input_proto.clearable = clearable
         text_input_proto.label_visibility.value = get_label_visibility_proto_value(
             label_visibility
         )
+        nullable = False
+        if ctx and ctx.session_state:
+            try:
+                nullable = (
+                    True
+                    if clearable and ctx.session_state[not_nullable_key] is False
+                    else False
+                )
+            except KeyError:
+                nullable = True if clearable else False
+
         if widget_state.value_changed:
-            text_input_proto.value = widget_state.value
+            if not nullable:
+                text_input_proto.clearable = False
+            text_input_proto.value = str(widget_state.value)
             text_input_proto.set_value = True
 
         self.dg._enqueue("text_input", text_input_proto)
-        return widget_state.value
+        if nullable:
+            return (
+                None
+                if not widget_state.value or widget_state.value == "None"
+                else widget_state.value
+            )
+        return "" if not widget_state.value else widget_state.value
 
     @gather_metrics("text_area")
     def text_area(
         self,
         label: str,
-        value: SupportsStr = "",
+        value: Union[SupportsStr, None] = "",
         height: Optional[int] = None,
         max_chars: Optional[int] = None,
         key: Optional[Key] = None,
@@ -287,7 +349,7 @@ class TextWidgetsMixin:
         placeholder: Optional[str] = None,
         disabled: bool = False,
         label_visibility: LabelVisibility = "visible",
-    ) -> str:
+    ) -> Union[str, None]:
         r"""Display a multi-line text input widget.
 
         Parameters
@@ -390,7 +452,7 @@ class TextWidgetsMixin:
     def _text_area(
         self,
         label: str,
-        value: SupportsStr = "",
+        value: Union[SupportsStr, None] = "",
         height: Optional[int] = None,
         max_chars: Optional[int] = None,
         key: Optional[Key] = None,
@@ -403,7 +465,7 @@ class TextWidgetsMixin:
         disabled: bool = False,
         label_visibility: LabelVisibility = "visible",
         ctx: Optional[ScriptRunContext] = None,
-    ) -> str:
+    ) -> Union[str, None]:
         key = to_key(key)
         check_callback_rules(self.dg, on_change)
         check_session_state_rules(default_value=None if value == "" else value, key=key)
@@ -412,7 +474,8 @@ class TextWidgetsMixin:
 
         text_area_proto = TextAreaProto()
         text_area_proto.label = label
-        text_area_proto.default = str(value)
+        text_area_proto.default = "" if value is None else str(value)
+        clearable = value is None
         text_area_proto.form_id = current_form_id(self.dg)
 
         if help is not None:
@@ -435,23 +498,44 @@ class TextWidgetsMixin:
             on_change_handler=on_change,
             args=args,
             kwargs=kwargs,
-            deserializer=serde.deserialize,
-            serializer=serde.serialize,
+            deserializer=serde.deserialize_nullable if clearable else serde.deserialize,
+            serializer=serde.deserialize_nullable if clearable else serde.serialize,  # type: ignore
             ctx=ctx,
         )
+        not_nullable_key = f"{NOT_NULLABLE_PREFIX}_{widget_state.widget_id}"
 
         # This needs to be done after register_widget because we don't want
         # the following proto fields to affect a widget's ID.
         text_area_proto.disabled = disabled
+        text_area_proto.clearable = clearable
         text_area_proto.label_visibility.value = get_label_visibility_proto_value(
             label_visibility
         )
+
+        nullable = False
+        if ctx and ctx.session_state:
+            try:
+                nullable = (
+                    True
+                    if clearable and ctx.session_state[not_nullable_key] is False
+                    else False
+                )
+            except KeyError:
+                nullable = True if clearable else False
         if widget_state.value_changed:
-            text_area_proto.value = widget_state.value
+            text_area_proto.value = str(widget_state.value)
+            if not nullable:
+                text_area_proto.clearable = False
             text_area_proto.set_value = True
 
         self.dg._enqueue("text_area", text_area_proto)
-        return widget_state.value
+        if nullable:
+            return (
+                None
+                if not widget_state.value or widget_state.value == "None"
+                else widget_state.value
+            )
+        return "" if not widget_state.value else widget_state.value
 
     @property
     def dg(self) -> "streamlit.delta_generator.DeltaGenerator":
